@@ -1,0 +1,7 @@
+{
+	"larvituser":	{
+		"actions": [
+			"setPassword",
+		]
+	}
+}

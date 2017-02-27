@@ -1,0 +1,23 @@
+{
+	"Console": {
+		"colorize":	true,
+		"timestamp":	true,
+		"level":	"verbose",
+		"json":	false,
+		"handleExceptions":	true
+	},
+	"DailyRotateFile": {
+		"filename":	"./logs/server.log",
+		"timestamp":	true,
+		"datePattern":	".yyyy-MM-dd",
+		"level":	"verbose",
+		"json":	false,
+		"handleExceptions":	true
+	},
+	"File": {
+		"filename":	"./logs/critical.log",
+		"level":	"warn",
+		"handleExceptions":	true,
+		"json":	false
+	}
+}
