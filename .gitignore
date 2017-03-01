@@ -1,8 +1,10 @@
 ._*
 .DS_Store
 config/amqp.json
+config/amqp_test.json
 config/log.json
-config/mail.json
+config/mailConf_test.json
+config/mailConf.json
 config/subscriptions.json
 node_modules
 npm-debug.log
