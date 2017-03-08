@@ -4,6 +4,7 @@ const	EventEmitter	= require('events').EventEmitter,
 	eventEmitter	= new EventEmitter(),
 	lUtils	= require('larvitutils'),
 	async	= require('async'),
+	mail	= require('larvitmail'),
 	log	= require('winston'),
 	fs	= require('fs'),
 	_	= require('lodash');
@@ -11,7 +12,8 @@ const	EventEmitter	= require('events').EventEmitter,
 
 let	readyInProgress	= false,
 	isReady	= false,
-	intercom;
+	intercom,
+	mailConfig;
 
 function ready(cb) {
 	const	tasks	= [];
@@ -31,6 +33,12 @@ function ready(cb) {
 		cb();
 	});
 
+	// Set mailer
+	tasks.push(function(cb) {
+		mail.setup(mailConfig);
+		cb();
+	});
+
 	async.series(tasks, function() {
 		isReady	= true;
 		eventEmitter.emit('ready');
@@ -41,7 +49,7 @@ function ready(cb) {
 function Mailer(options) {
 	this.ready	= ready; // To expose to the outside world
 	this.subscriptions 	= options.subscriptions;
-	this.mailConfig	=	options.mailConfig;
+	mailConfig	=	options.mailConfig;
 };
 
 
@@ -63,7 +71,7 @@ Mailer.prototype.start = function(cb) {
 					if (that.subscriptions[exchange].actions.includes(message.action)) {
 						const	tasks	= [];
 
-						let	templateData;
+						let	mailData;;
 
 						// Looking for data extension
 						tasks.push(function (cb) {
@@ -72,41 +80,45 @@ Mailer.prototype.start = function(cb) {
 							fs.stat(extensionPath, (err) => {
 								if (err) {
 									log.info('larvitammail - index.js: No data extension found for action ' + message.action);
-									cb(null);
+									cb(err);
+									return;
 								} else {
 									let extension;
 									log.info('larvitammail - index.js: Data extension found for action ' + message.action);
 									extension = require(extensionPath);
 									extension.run(message.params, function(err, data) {
-										templateData = data;
+										mailData = data;
 										cb(err);
 									});
 								}
 							});
 						});
 
-						// Get render template
+						// Render template
 						tasks.push(function (cb) {
 							getTemplate(message.action, function (err, template) {
 								if (err) { cb(err); return; };
-								let	mail	= _.template(template);
-								console.log(mail({'data': templateData}));
+								let	render	= _.template(template);
+
+								mailData.text	= render({'data': mailData.templateData});
 								cb();
 							});
 						});
 
 						// Send email.
 						tasks.push(function (cb) {
-							console.log('Sending email...');
-							cb();
+							delete mailData.templateData;
+							mail.getInstance().send(mailData, function(err) {
+								if (err) throw err;
+								log.info('larvitammail - index.js: Email sent to ' + mailData.to);
+								cb();
+							});
 						});
 
 						async.series(tasks, function(err) {
 							if (err) { cb(err); return; };
 						});
-
 					}
-
 				}, function(err) {
 					cb(err);
 				});
