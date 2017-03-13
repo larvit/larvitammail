@@ -84,7 +84,7 @@ Mailer.prototype.start = function(cb) {
 									return;
 								} else {
 									let extension;
-									log.info('larvitammail - index.js: Data extension found for action ' + message.action);
+									log.info('larvitammail - index.js: Data extension found for action: ' + message.action);
 									extension = require(extensionPath);
 									extension.run(message.params, function(err, data) {
 										mailData = data;
@@ -96,7 +96,19 @@ Mailer.prototype.start = function(cb) {
 
 						// Render template
 						tasks.push(function (cb) {
-							const templatePath = process.cwd() + '/templates/' + exchange + '/' + message.action + '.tmpl';
+							let templatePath = process.cwd() + '/templates/';
+
+							if (mailData.notSend !== undefined && mailData.notSend === true) {
+								cb();
+								return;
+							}
+
+							if (mailData.template !== undefined) {
+								templatePath += mailData.template;
+							} else {
+								templatePath += exchange + '/' + message.action + '.tmpl';
+							}
+
 							fs.readFile(templatePath, (err, template) => {
 								if (err) { cb(err); return; };
 								let	render	= _.template(template);
@@ -108,10 +120,15 @@ Mailer.prototype.start = function(cb) {
 
 						// Send email.
 						tasks.push(function (cb) {
+							if (mailData.notSend !== undefined && mailData.notSend === true) {
+								log.info('larvitammail - index.js: notSend-flag set and will not send email for action: ' + message.action);
+								cb();
+								return;
+							}
 							delete mailData.templateData;
 							mail.getInstance().send(mailData, function(err) {
 								if (err) throw err;
-								log.info('larvitammail - index.js: Email sent to ' + mailData.to + ' from action ' + message.action);
+								log.info('larvitammail - index.js: Email sent to ' + mailData.to + ' for action: ' + message.action);
 								cb();
 							});
 						});
