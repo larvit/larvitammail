@@ -111,7 +111,7 @@ Mailer.prototype.start = function(cb) {
 							delete mailData.templateData;
 							mail.getInstance().send(mailData, function(err) {
 								if (err) throw err;
-								log.info('larvitammail - index.js: Email sent to ' + mailData.to);
+								log.info('larvitammail - index.js: Email sent to ' + mailData.to + ' from action ' + message.action);
 								cb();
 							});
 						});
