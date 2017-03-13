@@ -96,7 +96,8 @@ Mailer.prototype.start = function(cb) {
 
 						// Render template
 						tasks.push(function (cb) {
-							getTemplate(message.action, function (err, template) {
+							const templatePath = process.cwd() + '/templates/' + exchange + '/' + message.action + '.tmpl';
+							fs.readFile(templatePath, (err, template) => {
 								if (err) { cb(err); return; };
 								let	render	= _.template(template);
 
@@ -132,12 +133,6 @@ Mailer.prototype.start = function(cb) {
 
 	async.series(tasks, function(err) {
 		cb(err);
-	});
-};
-
-function getTemplate(action, cb) {
-	fs.readFile(process.cwd() + '/templates/' + action + '.tmpl', (err, data) => {
-		cb(err, data);
 	});
 };
 
