@@ -1,5 +1,6 @@
 'use strict';
 
+/*
 const	mailConfig	= require(__dirname + '/../config/mailConf_test.json'),
 	Intercom	= require('larvitamintercom'),
 	Mailer	= require('../index.js'),
@@ -13,12 +14,12 @@ let	intercom;
 
 // Set up winston
 log.remove(log.transports.Console);
-/**/log.add(log.transports.Console, {
+/** /log.add(log.transports.Console, {
 	'level':	'warn',
 	'colorize':	true,
 	'timestamp':	true,
 	'json':	false
-});/**/
+});/ ** /
 
 before(function(done) {
 	this.timeout(10000);
@@ -43,28 +44,4 @@ before(function(done) {
 	});
 
 	async.series(tasks, done);
-});
-
-//describe('Mail', function() {
-//	it('should mail', function(done) {
-//		const options	= {
-//			'subscriptions': {
-//				'larvituser': {
-//					'actions': [
-//						'setPassword'
-//					]
-//				}
-//			},
-//			'mailConfig': mailConfig
-//		};
-//
-//		let mailer = new Mailer(options);
-//
-//		mailer.start(function(err) {
-//			if (err) throw err;
-//			//done();
-//		});
-//
-//
-//	});
-//});
+});*/

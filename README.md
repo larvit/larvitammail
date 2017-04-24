@@ -1,15 +1,36 @@
 # larvitammail
+
 Mailing framework for the Larvit AM project
 
 Subscribing to exchanges in the RabbitMQ-network and by extensions and templates
 sends emails depending on rules in the extensions.
 
-
 ## Usage
 
-#### Setup
+### Setup
+
 ```javascript
-const options = {
+const	AmMail	= require('larvitammail'),
+	mail	= require('larvitmail');
+
+let	amMail;
+
+// See more details on https://github.com/larvit/larvitmail
+mail.setup({
+	'transportConf': 'smtps://user%40gmail.com:pass@smtp.gmail.com',
+	'mailDefaults': {
+		'from':	'foo@bar.com'
+	}
+});
+
+amMail = new AmMail({
+	'intercom':	new Intercom...,
+	'mail':	mail,
+
+})
+
+
+options = {
         subscriptions: {
           exampleExchange:	{
             actions: [

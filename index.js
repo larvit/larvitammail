@@ -1,68 +1,30 @@
 'use strict';
 
-const	EventEmitter	= require('events').EventEmitter,
-	eventEmitter	= new EventEmitter(),
-	lUtils	= require('larvitutils'),
+const	topLogPrefix	= 'larvitammail: ./index.js: ',
 	async	= require('async'),
 	mail	= require('larvitmail'),
 	log	= require('winston'),
 	fs	= require('fs'),
 	_	= require('lodash');
 
-
-let	readyInProgress	= false,
-	isReady	= false,
-	intercom,
-	mailConfig;
-
-function ready(cb) {
-	const	tasks	= [];
-
-	if (isReady === true) { cb(); return; }
-
-	if (readyInProgress === true) {
-		eventEmitter.on('ready', cb);
-		return;
-	}
-
-	readyInProgress = true;
-
-	// Set intercom
-	tasks.push(function(cb) {
-		intercom	= lUtils.instances.mailerIntercom;
-		cb();
-	});
-
-	// Set mailer
-	tasks.push(function(cb) {
-		mail.setup(mailConfig);
-		cb();
-	});
-
-	async.series(tasks, function() {
-		isReady	= true;
-		eventEmitter.emit('ready');
-		cb();
-	});
-}
-
 function Mailer(options) {
-	this.ready	= ready; // To expose to the outside world
-	this.subscriptions 	= options.subscriptions;
-	mailConfig	=	options.mailConfig;
+	this.options	= options;
+	this.subscriptions 	= {};
+	this.intercom	= options.intercom;
+	mail.setup(options.mailConfig);
 };
 
-
 Mailer.prototype.start = function(cb) {
-	const	tasks	= [],
+	const	logPrefix	= topLogPrefix + 'Mailer.prototype.start() - ',
+		tasks	= [],
 		that	= this;
 
 	tasks.push(ready);
 
-
 	tasks.push(function(cb) {
 		const	tasks	= [];
-		for (let exchange in that.subscriptions) {
+
+		for (const exchange in that.subscriptions) {
 			tasks.push(function(cb) {
 				const	options	= {'exchange': exchange};
 				intercom.subscribe(options, function(message, ack) {
@@ -79,16 +41,16 @@ Mailer.prototype.start = function(cb) {
 
 							fs.stat(extensionPath, (err) => {
 								if (err) {
-									log.info('larvitammail - index.js: No data extension found for action ' + message.action);
-									cb(err);
-									return;
+									log.info(logPrefix + 'No data extension found for action ' + message.action);
+									return cb(err);
 								} else {
-									let extension;
-									log.info('larvitammail - index.js: Data extension found for action: ' + message.action);
-									extension = require(extensionPath);
+									const	extension = require(extensionPath);
+
+									log.info(logPrefix + 'Data extension found for action: ' + message.action);
+
 									extension.run(message.params, function(err, data) {
 										mailData = data;
-										cb(err);
+										return cb(err);
 									});
 								}
 							});
@@ -99,8 +61,7 @@ Mailer.prototype.start = function(cb) {
 							let templatePath = process.cwd() + '/templates/';
 
 							if (mailData.notSend !== undefined && mailData.notSend === true) {
-								cb();
-								return;
+								return cb();
 							}
 
 							if (mailData.template !== undefined) {
@@ -110,8 +71,8 @@ Mailer.prototype.start = function(cb) {
 							}
 
 							fs.readFile(templatePath, (err, template) => {
-								if (err) { cb(err); return; };
-								let	render	= _.template(template);
+								if (err) return cb(err);
+								const	render	= _.template(template);
 
 								mailData.text	= render({'data': mailData.templateData});
 								cb();
@@ -121,37 +82,27 @@ Mailer.prototype.start = function(cb) {
 						// Send email.
 						tasks.push(function (cb) {
 							if (mailData.notSend !== undefined && mailData.notSend === true) {
-								log.info('larvitammail - index.js: notSend-flag set and will not send email for action: ' + message.action);
-								cb();
-								return;
+								log.info(logPrefix + 'notSend-flag set and will not send email for action: ' + message.action);
+								return cb();
 							}
 							delete mailData.templateData;
 							mail.getInstance().send(mailData, function(err) {
-								if (err) throw err;
-								log.info('larvitammail - index.js: Email sent to ' + mailData.to + ' for action: ' + message.action);
-								cb();
+								if (err) return cb(err);
+								log.info(logPrefix + 'Email sent to ' + mailData.to + ' for action: ' + message.action);
+								return cb();
 							});
 						});
 
-						async.series(tasks, function(err) {
-							if (err) { cb(err); return; };
-						});
+						async.series(tasks, cb);
 					}
-				}, function(err) {
-					cb(err);
-				});
+				}, cb);
 			});
 		}
 
-		async.series(tasks, function(err) {
-			cb(err);
-		});
+		async.series(tasks, cb);
 	});
 
-	async.series(tasks, function(err) {
-		cb(err);
-	});
+	async.series(tasks, cb);
 };
-
 
 exports = module.exports = Mailer;
