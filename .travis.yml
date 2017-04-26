@@ -1,0 +1,16 @@
+language: node_js
+
+node_js:
+  - 4
+  - 6
+  - 7
+
+notifications:
+  email:
+    - lilleman@larvit.se
+    - tobias@nublar.se
+
+install:
+  - npm i
+
+script: mocha
