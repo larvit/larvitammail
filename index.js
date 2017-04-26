@@ -1,6 +1,7 @@
 'use strict';
 
-const	topLogPrefix	= 'larvitammail: ./index.js: ',
+const	topLogPrefix	= 'larvitammail: index.js: ',
+	EventEmitter	= require('events'),
 	async	= require('async'),
 	log	= require('winston'),
 	fs	= require('fs'),
@@ -14,12 +15,19 @@ function Mailer(options, cb) {
 	}
 
 	this.options	= options;
-	this.subscriptions 	= {};
+
+	this.compiledTemplates	= {};
+	this.emitter	= new EventEmitter();
 	this.intercom	= options.intercom;
 	this.mail	= options.mail;
-	this.compiledTemplates	= {};
+	this.subscribed	= false;
+	this.subscriptionInProgress	= false;
+	this.subscriptions 	= {};
+
+	this.emitter.setMaxListeners(30);
 
 	if (this.intercom && this.mail) {
+		log.verbose(logPrefix + 'intercom and mail is set, run registerSubscriptions()');
 		this.registerSubscriptions(cb);
 	} else {
 		log.info(logPrefix + 'Missing intercom and/or mail, not started!');
@@ -75,28 +83,8 @@ Mailer.prototype.getActions = function getActions(subPath, cb) {
 	});
 };
 
-Mailer.prototype.resolveTemplatePath = function resolveTemplatePath(subPath, exchange, action, mailData, cb) {
-	const	logPrefix	= topLogPrefix + 'Mailer.prototype.resolveTemplatePath() - ';
-
-	let	templatePath;
-
-	if (mailData.templatePath === undefined) {
-		templatePath = subPath + '/' + exchange + '/' + action + '.tmpl';
-	} else {
-		templatePath = mailData.templatePath;
-	}
-
-	if ( ! fs.existsSync(templatePath)) {
-		const	err	= new Error('Mail template not found: "' + templatePath + '"');
-		log.error(logPrefix + err.message);
-		return cb(err);
-	}
-
-	cb(null, templatePath);
-};
-
 Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message, ack) {
-	const	logPrefix	= topLogPrefix + 'handleIncMsg() - exchange: "' + exchange + '", action: "' + message.action + '"',
+	const	logPrefix	= topLogPrefix + 'handleIncMsg() - exchange: "' + exchange + '", action: "' + message.action + '" - ',
 		tasks	= [],
 		that	= this;
 
@@ -110,11 +98,15 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 
 	// Run subscription function
 	tasks.push(function (cb) {
+		log.debug(logPrefix + 'Running subscription function');
+
 		that.subscriptions[exchange][message.action](message, function (err, result) {
 			if (err) {
 				log.warn(logPrefix + 'Err running subscription function: ' + err.message);
 				return cb(err);
 			}
+
+			log.debug(logPrefix + 'Subscription function ran');
 
 			mailData	= result;
 
@@ -128,21 +120,41 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 
 	// Resolve template
 	tasks.push(function (cb) {
-		if (mailData.notSend === true) return cb();
+		log.debug(logPrefix + 'Resolving template');
+
+		if (mailData.notSend === true) {
+			log.debug(logPrefix + 'notSend === true, do not proceed with resolving template');
+			return cb();
+		}
 
 		that.resolveTemplatePath(subPath, exchange, message.action, mailData, function (err, result) {
 			templatePath	= result;
+
+			if ( ! err) {
+				log.debug(logPrefix + 'Template resolved');
+			}
+
 			cb(err);
 		});
 	});
 
 	// Compile template
 	tasks.push(function (cb) {
-		if (mailData.notSend	=== true	)	return cb();
-		if (that.compiledTemplates[templatePath]	!== undefined	)	return cb();
+		if (mailData.notSend === true) {
+			log.debug(logPrefix + 'notSend === true, do not proceed with compiling template');
+			return cb();
+		}
+
+		if (that.compiledTemplates[templatePath] !== undefined) {
+			log.debug(logPrefix + 'that.compiledTemplates[templatePath] !== undefined, compilation not necessary');
+			return cb();
+		}
 
 		fs.readFile(templatePath, function (err, sourceTemplate) {
-			if (err) return cb(err);
+			if (err) {
+				log.error(logPrefix + 'Could not read templatePath: "' + templatePath + '", err: ' + err.message);
+				return cb(err);
+			}
 
 			try {
 				that.compiledTemplates[templatePath] = _.template(sourceTemplate);
@@ -151,13 +163,18 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 				return cb(err);
 			}
 
+			log.debug(logPrefix + 'Template compiled');
+
 			cb();
 		});
 	});
 
 	// Render template
 	tasks.push(function (cb) {
-		if (mailData.notSend === true) return cb();
+		if (mailData.notSend === true) {
+			log.debug(logPrefix + 'notSend === true, do not proceed with rendering template');
+			return cb();
+		}
 
 		try {
 			mailData.text	= that.compiledTemplates[templatePath](mailData.templateData);
@@ -166,17 +183,26 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 			return cb(err);
 		}
 
+		log.debug(logPrefix + 'Template rendered');
+
 		cb();
 	});
 
 	// Send email
 	tasks.push(function (cb) {
-		if (mailData.notSend === true) return cb();
+		if (mailData.notSend === true) {
+			log.debug(logPrefix + 'notSend === true, do not proceed with sending email');
+			return cb();
+		}
+
+		log.debug(logPrefix + 'Trying to send email to: "' + mailData.to + '"');
 
 		delete mailData.templateData;
 		that.mail.getInstance().send(mailData, function(err) {
 			if (err) return cb(err);
 			log.verbose(logPrefix + 'Email sent to: "' + mailData.to + '" with subject: "' + mailData.subject + '"');
+
+			that.emitter.emit('mailSent', mailData); // Mainly for testing purposes
 			return cb();
 		});
 	});
@@ -184,11 +210,32 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 	async.series(tasks, ack);
 };
 
+Mailer.prototype.ready = function ready(cb) {
+	if (this.subscribed === true) return cb();
+
+	this.emitter.once('subscribed', cb);
+};
+
 Mailer.prototype.registerSubscriptions = function registerSubscriptions(cb) {
 	const	logPrefix	= topLogPrefix + 'Mailer.prototype.registerSubscriptions() - ',
-		subPath	= process.pwd() + '/subscriptions',
+		subPath	= process.cwd() + '/subscriptions',
 		tasks	= [],
 		that	= this;
+
+	if (typeof cb !== 'function') {
+		cb = function () {};
+	}
+
+	if (that.subscriptionInProgress === true) {
+		const	err	= new Error(logPrefix + 'registration already in progress');
+		return cb(err);
+	}
+
+	if (that.subscribed === true) {
+		return cb();
+	}
+
+	that.subscriptionInProgress = true;
 
 	if ( ! fs.existsSync(subPath)) {
 		log.info(logPrefix + 'No subscriptions registered, could not find subscriptions path: "' + subPath + '"');
@@ -217,6 +264,35 @@ Mailer.prototype.registerSubscriptions = function registerSubscriptions(cb) {
 
 		async.parallel(tasks, cb);
 	});
+
+	async.series(tasks, function (err) {
+		that.subscriptionInProgress = false;
+		if ( ! err) {
+			that.subscribed	= true;
+			that.emitter.emit('subscribed');
+		}
+		cb(err);
+	});
+};
+
+Mailer.prototype.resolveTemplatePath = function resolveTemplatePath(subPath, exchange, action, mailData, cb) {
+	const	logPrefix	= topLogPrefix + 'Mailer.prototype.resolveTemplatePath() - ';
+
+	let	templatePath;
+
+	if (mailData.templatePath === undefined) {
+		templatePath = subPath + '/' + exchange + '/' + action + '.tmpl';
+	} else {
+		templatePath = mailData.templatePath;
+	}
+
+	if ( ! fs.existsSync(templatePath)) {
+		const	err	= new Error('Mail template not found: "' + templatePath + '"');
+		log.error(logPrefix + err.message);
+		return cb(err);
+	}
+
+	cb(null, templatePath);
 };
 
 exports = module.exports = Mailer;

@@ -1,7 +1,10 @@
 'use strict';
 
-const	AmMail	= require('../index.js'),
+const	stubTransport	= require('nodemailer-stub-transport'),
+	Intercom	= require('larvitamintercom'),
+	AmMail	= require('../index.js'),
 	assert	= require('assert'),
+	mail	= require('larvitmail'),
 	log	= require('winston');
 
 // Set up winston
@@ -12,6 +15,9 @@ log.remove(log.transports.Console);
 	'timestamp':	true,
 	'json':	false
 });/**/
+
+// Set current working directory to make sure subscriptions-folders are found correctly
+process.chdir(__dirname);
 
 describe('Basics', function () {
 	const	subPath	= __dirname + '/subscriptions';
@@ -87,6 +93,35 @@ describe('Basics', function () {
 			assert.strictEqual(err instanceof Error,	true);
 
 			done();
+		});
+	});
+});
+
+describe('Integration', function () {
+	it('listen to a subscription, send a mail and dont crash', function (done) {
+		const	intercom	= new Intercom('loopback interface'),
+			amMail	= new AmMail({'intercom': intercom, 'mail': mail}, function (err) { if (err) throw err;});
+
+		mail.setup({
+			'transportConf': stubTransport(),
+			'mailDefaults': {
+				'from':	'foo@bar.com'
+			}
+		});
+
+		amMail.ready(function (err) {
+			if (err) throw err;
+
+			intercom.send({'action': 'blubb'}, {'exchange': 'foo'}, function (err) {
+				if (err) throw err;
+
+				amMail.emitter.on('mailSent', function (mailData) {
+					assert.strictEqual(mailData.to,	'foo@blubb.org');
+					assert.strictEqual(mailData.text,	'Testing 123 Bosse tut\n');
+
+					done();
+				});
+			});
 		});
 	});
 });
