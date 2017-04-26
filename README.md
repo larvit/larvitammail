@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/larvit/larvitammail.svg?branch=master)](https://travis-ci.org/larvit/larvitammail) [![Dependencies](https://david-dm.org/larvit/larvitammail.svg)](https://david-dm.org/larvit/larvitammail.svg)
+
 # larvitammail
 
 Mailing framework for the Larvit AM project
