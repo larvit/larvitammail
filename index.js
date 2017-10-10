@@ -177,7 +177,12 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 		}
 
 		try {
-			mailData.text	= that.compiledTemplates[templatePath](mailData.templateData);
+			if (mailData.isHtml) {
+				mailData.html	= that.compiledTemplates[templatePath](mailData.templateData);
+			}
+			else {
+				mailData.text	= that.compiledTemplates[templatePath](mailData.templateData);
+			}
 		} catch (err) {
 			log.error(logPrefix + 'Could not render template, err: ' + err.message);
 			return cb(err);
