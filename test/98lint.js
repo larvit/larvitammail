@@ -1,5 +1,8 @@
 'use strict';
 
+// Set current working directory so the linting is happening on the right path
+process.chdir(__dirname + '/..');
+
 require(
 	'mocha-eslint')([__dirname + '/..'],
 	{

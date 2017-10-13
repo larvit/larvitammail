@@ -2,6 +2,7 @@
 
 const	topLogPrefix	= 'larvitammail: index.js: ',
 	EventEmitter	= require('events'),
+	Intercom	= require('larvitamintercom'),
 	async	= require('async'),
 	log	= require('winston'),
 	fs	= require('fs'),
@@ -14,8 +15,11 @@ function Mailer(options, cb) {
 		options	= {};
 	}
 
-	this.options	= options;
+	if (typeof cb !== 'function') {
+		cb	= function () {};
+	}
 
+	this.options	= options;
 	this.compiledTemplates	= {};
 	this.emitter	= new EventEmitter();
 	this.intercom	= options.intercom;
@@ -26,12 +30,19 @@ function Mailer(options, cb) {
 
 	this.emitter.setMaxListeners(30);
 
-	if (this.intercom && this.mail) {
-		log.verbose(logPrefix + 'intercom and mail is set, run registerSubscriptions()');
-		this.registerSubscriptions(cb);
-	} else {
-		log.info(logPrefix + 'Missing intercom and/or mail, not started!');
+	if ( ! (this.intercom instanceof Intercom)) {
+		const	err	= new Error('options.intercom must be an instance of larvitamintercom');
+		log.error(logPrefix + err.message);
+		return cb(err);
 	}
+
+	if ( ! this.mail) {
+		const	err	= new Error('options.mail must be set');
+		log.error(logPrefix + err.message);
+		return cb(err);
+	}
+
+	this.registerSubscriptions(cb);
 };
 
 Mailer.prototype.getActions = function getActions(subPath, cb) {
