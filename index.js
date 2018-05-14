@@ -179,8 +179,7 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 		try {
 			if (mailData.isHtml) {
 				mailData.html	= that.compiledTemplates[templatePath](mailData.templateData);
-			}
-			else {
+			} else {
 				mailData.text	= that.compiledTemplates[templatePath](mailData.templateData);
 			}
 		} catch (err) {
