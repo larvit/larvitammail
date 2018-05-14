@@ -1,157 +1,303 @@
 'use strict';
 
-const	EventEmitter	= require('events').EventEmitter,
-	eventEmitter	= new EventEmitter(),
-	lUtils	= require('larvitutils'),
+const	topLogPrefix	= 'larvitammail: index.js: ',
+	EventEmitter	= require('events'),
 	async	= require('async'),
-	mail	= require('larvitmail'),
 	log	= require('winston'),
 	fs	= require('fs'),
 	_	= require('lodash');
 
+function Mailer(options, cb) {
+	const	logPrefix	= topLogPrefix + 'Mailer() - ';
 
-let	readyInProgress	= false,
-	isReady	= false,
-	intercom,
-	mailConfig;
-
-function ready(cb) {
-	const	tasks	= [];
-
-	if (isReady === true) { cb(); return; }
-
-	if (readyInProgress === true) {
-		eventEmitter.on('ready', cb);
-		return;
+	if (options === undefined) {
+		options	= {};
 	}
 
-	readyInProgress = true;
+	this.options	= options;
 
-	// Set intercom
-	tasks.push(function(cb) {
-		intercom	= lUtils.instances.mailerIntercom;
-		cb();
-	});
+	this.compiledTemplates	= {};
+	this.emitter	= new EventEmitter();
+	this.intercom	= options.intercom;
+	this.mail	= options.mail;
+	this.subscribed	= false;
+	this.subscriptionInProgress	= false;
+	this.subscriptions 	= {};
 
-	// Set mailer
-	tasks.push(function(cb) {
-		mail.setup(mailConfig);
-		cb();
-	});
+	this.emitter.setMaxListeners(30);
 
-	async.series(tasks, function() {
-		isReady	= true;
-		eventEmitter.emit('ready');
-		cb();
-	});
-}
-
-function Mailer(options) {
-	this.ready	= ready; // To expose to the outside world
-	this.subscriptions 	= options.subscriptions;
-	mailConfig	=	options.mailConfig;
+	if (this.intercom && this.mail) {
+		log.verbose(logPrefix + 'intercom and mail is set, run registerSubscriptions()');
+		this.registerSubscriptions(cb);
+	} else {
+		log.info(logPrefix + 'Missing intercom and/or mail, not started!');
+	}
 };
 
+Mailer.prototype.getActions = function getActions(subPath, cb) {
+	const	subscriptions	= {},
+		logPrefix	= topLogPrefix + 'getActions() - ';
 
-Mailer.prototype.start = function(cb) {
-	const	tasks	= [],
-		that	= this;
-
-	tasks.push(ready);
-
-
-	tasks.push(function(cb) {
+	fs.readdir(subPath, function (err, exchanges) {
 		const	tasks	= [];
-		for (let exchange in that.subscriptions) {
-			tasks.push(function(cb) {
-				const	options	= {'exchange': exchange};
-				intercom.subscribe(options, function(message, ack) {
-					ack();
 
-					if (that.subscriptions[exchange].actions.includes(message.action)) {
-						const	tasks	= [];
+		if (err) {
+			log.warn(logPrefix + 'Could not read subscriptions dir: "' + subPath + '", err: ' + err.message);
+			return cb(err);
+		}
 
-						let	mailData;;
+		// For each exchange, list actions
+		for (let i = 0; exchanges[i] !== undefined; i ++) {
+			const	exchange	= exchanges[i],
+				exPath	= subPath + '/' + exchange;
 
-						// Looking for data extension
-						tasks.push(function (cb) {
-							const extensionPath = process.cwd() + '/extensions/' + exchange + '/' + message.action + '.js';
-
-							fs.stat(extensionPath, (err) => {
-								if (err) {
-									log.info('larvitammail - index.js: No data extension found for action ' + message.action);
-									cb(err);
-									return;
-								} else {
-									let extension;
-									log.info('larvitammail - index.js: Data extension found for action: ' + message.action);
-									extension = require(extensionPath);
-									extension.run(message.params, function(err, data) {
-										mailData = data;
-										cb(err);
-									});
-								}
-							});
-						});
-
-						// Render template
-						tasks.push(function (cb) {
-							let templatePath = process.cwd() + '/templates/';
-
-							if (mailData.notSend !== undefined && mailData.notSend === true) {
-								cb();
-								return;
-							}
-
-							if (mailData.template !== undefined) {
-								templatePath += mailData.template;
-							} else {
-								templatePath += exchange + '/' + message.action + '.tmpl';
-							}
-
-							fs.readFile(templatePath, (err, template) => {
-								if (err) { cb(err); return; };
-								let	render	= _.template(template);
-
-								mailData.text	= render({'data': mailData.templateData});
-								cb();
-							});
-						});
-
-						// Send email.
-						tasks.push(function (cb) {
-							if (mailData.notSend !== undefined && mailData.notSend === true) {
-								log.info('larvitammail - index.js: notSend-flag set and will not send email for action: ' + message.action);
-								cb();
-								return;
-							}
-							delete mailData.templateData;
-							mail.getInstance().send(mailData, function(err) {
-								if (err) throw err;
-								log.info('larvitammail - index.js: Email sent to ' + mailData.to + ' for action: ' + message.action);
-								cb();
-							});
-						});
-
-						async.series(tasks, function(err) {
-							if (err) { cb(err); return; };
-						});
+			tasks.push(function (cb) {
+				fs.readdir(exPath, function (err, actions) {
+					if (err) {
+						log.warn(logPrefix + 'Could not read actions for dir: "' + exPath + '", err: ' + err.message);
+						return cb(err);
 					}
-				}, function(err) {
-					cb(err);
+
+					if (subscriptions[exchange] === undefined) {
+						subscriptions[exchange] = {};
+					}
+
+					for (let i = 0; actions[i] !== undefined; i ++) {
+						const	action	= actions[i];
+
+						if (action.substring(action.length - 3) === '.js') {
+							const	actPath	= exPath + '/' + action;
+
+							subscriptions[exchange][action.substring(0, action.length - 3)] = require(actPath);
+						}
+					}
+
+					cb();
 				});
 			});
 		}
 
-		async.series(tasks, function(err) {
+		async.parallel(tasks, function (err) {
+			cb(err, subscriptions);
+		});
+	});
+};
+
+Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message, ack) {
+	const	logPrefix	= topLogPrefix + 'handleIncMsg() - exchange: "' + exchange + '", action: "' + message.action + '" - ',
+		tasks	= [],
+		that	= this;
+
+	let	templatePath,
+		mailData;
+
+	if (that.subscriptions[exchange][message.action] === undefined) {
+		log.debug(logPrefix + 'No subscription found, ignoring');
+		return ack();
+	}
+
+	// Run subscription function
+	tasks.push(function (cb) {
+		log.debug(logPrefix + 'Running subscription function');
+
+		that.subscriptions[exchange][message.action](message, function (err, result) {
+			if (err) {
+				log.warn(logPrefix + 'Err running subscription function: ' + err.message);
+				return cb(err);
+			}
+
+			log.debug(logPrefix + 'Subscription function ran');
+
+			mailData	= result;
+
+			if (mailData.notSend === true) {
+				log.debug(logPrefix + 'mailData.notSend === true - do not send this email');
+			}
+
+			cb();
+		});
+	});
+
+	// Resolve template
+	tasks.push(function (cb) {
+		log.debug(logPrefix + 'Resolving template');
+
+		if (mailData.notSend === true) {
+			log.debug(logPrefix + 'notSend === true, do not proceed with resolving template');
+			return cb();
+		}
+
+		that.resolveTemplatePath(subPath, exchange, message.action, mailData, function (err, result) {
+			templatePath	= result;
+
+			if ( ! err) {
+				log.debug(logPrefix + 'Template resolved');
+			}
+
 			cb(err);
 		});
 	});
 
-	async.series(tasks, function(err) {
+	// Compile template
+	tasks.push(function (cb) {
+		if (mailData.notSend === true) {
+			log.debug(logPrefix + 'notSend === true, do not proceed with compiling template');
+			return cb();
+		}
+
+		if (that.compiledTemplates[templatePath] !== undefined) {
+			log.debug(logPrefix + 'that.compiledTemplates[templatePath] !== undefined, compilation not necessary');
+			return cb();
+		}
+
+		fs.readFile(templatePath, function (err, sourceTemplate) {
+			if (err) {
+				log.error(logPrefix + 'Could not read templatePath: "' + templatePath + '", err: ' + err.message);
+				return cb(err);
+			}
+
+			try {
+				that.compiledTemplates[templatePath] = _.template(sourceTemplate);
+			} catch (err) {
+				log.error(logPrefix + 'Could not compile template, err: ' + err.message);
+				return cb(err);
+			}
+
+			log.debug(logPrefix + 'Template compiled');
+
+			cb();
+		});
+	});
+
+	// Render template
+	tasks.push(function (cb) {
+		if (mailData.notSend === true) {
+			log.debug(logPrefix + 'notSend === true, do not proceed with rendering template');
+			return cb();
+		}
+
+		try {
+			if (mailData.isHtml) {
+				mailData.html	= that.compiledTemplates[templatePath](mailData.templateData);
+			}
+			else {
+				mailData.text	= that.compiledTemplates[templatePath](mailData.templateData);
+			}
+		} catch (err) {
+			log.error(logPrefix + 'Could not render template, err: ' + err.message);
+			return cb(err);
+		}
+
+		log.debug(logPrefix + 'Template rendered');
+
+		cb();
+	});
+
+	// Send email
+	tasks.push(function (cb) {
+		if (mailData.notSend === true) {
+			log.debug(logPrefix + 'notSend === true, do not proceed with sending email');
+			return cb();
+		}
+
+		log.debug(logPrefix + 'Trying to send email to: "' + mailData.to + '"');
+
+		delete mailData.templateData;
+		that.mail.getInstance().send(mailData, function(err) {
+			if (err) return cb(err);
+			log.verbose(logPrefix + 'Email sent to: "' + mailData.to + '" with subject: "' + mailData.subject + '"');
+
+			that.emitter.emit('mailSent', mailData); // Mainly for testing purposes
+			return cb();
+		});
+	});
+
+	async.series(tasks, ack);
+};
+
+Mailer.prototype.ready = function ready(cb) {
+	if (this.subscribed === true) return cb();
+
+	this.emitter.once('subscribed', cb);
+};
+
+Mailer.prototype.registerSubscriptions = function registerSubscriptions(cb) {
+	const	logPrefix	= topLogPrefix + 'Mailer.prototype.registerSubscriptions() - ',
+		subPath	= process.cwd() + '/subscriptions',
+		tasks	= [],
+		that	= this;
+
+	if (typeof cb !== 'function') {
+		cb = function () {};
+	}
+
+	if (that.subscriptionInProgress === true) {
+		const	err	= new Error(logPrefix + 'registration already in progress');
+		return cb(err);
+	}
+
+	if (that.subscribed === true) {
+		return cb();
+	}
+
+	that.subscriptionInProgress = true;
+
+	if ( ! fs.existsSync(subPath)) {
+		log.info(logPrefix + 'No subscriptions registered, could not find subscriptions path: "' + subPath + '"');
+		return cb();
+	}
+
+	// Get exchanges and actions
+	tasks.push(function (cb) {
+		that.getActions(subPath, function (err, actions) {
+			that.subscriptions	= actions;
+			cb(err);
+		});
+	});
+
+	// For each action, register functions and send mails etc
+	tasks.push(function (cb) {
+		const	tasks	= [];
+
+		for (const exchange of Object.keys(that.subscriptions)) {
+			tasks.push(function (cb) {
+				that.intercom.subscribe({'exchange': exchange}, function (message, ack) {
+					that.handleIncMsg(subPath, exchange, message, ack);
+				}, cb);
+			});
+		}
+
+		async.parallel(tasks, cb);
+	});
+
+	async.series(tasks, function (err) {
+		that.subscriptionInProgress = false;
+		if ( ! err) {
+			that.subscribed	= true;
+			that.emitter.emit('subscribed');
+		}
 		cb(err);
 	});
 };
 
+Mailer.prototype.resolveTemplatePath = function resolveTemplatePath(subPath, exchange, action, mailData, cb) {
+	const	logPrefix	= topLogPrefix + 'Mailer.prototype.resolveTemplatePath() - ';
+
+	let	templatePath;
+
+	if (mailData.templatePath === undefined) {
+		templatePath = subPath + '/' + exchange + '/' + action + '.tmpl';
+	} else {
+		templatePath = mailData.templatePath;
+	}
+
+	if ( ! fs.existsSync(templatePath)) {
+		const	err	= new Error('Mail template not found: "' + templatePath + '"');
+		log.error(logPrefix + err.message);
+		return cb(err);
+	}
+
+	cb(null, templatePath);
+};
 
 exports = module.exports = Mailer;
