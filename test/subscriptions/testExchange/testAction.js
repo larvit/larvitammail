@@ -1,5 +1,5 @@
 'use strict';
 
 exports = module.exports = function (params, cb) {
-	cb(null, {'to':	'test@foo.com'});
+	cb(null, {to: 'test@foo.com'});
 };

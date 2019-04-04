@@ -1,28 +1,29 @@
 'use strict';
 
-const	topLogPrefix	= 'larvitammail: index.js: ',
-	EventEmitter	= require('events'),
-	async	= require('async'),
-	log	= require('winston'),
-	fs	= require('fs'),
-	_	= require('lodash');
+const EventEmitter = require('events');
+const async = require('async');
+const log = require('winston');
+const fs = require('fs');
+const _ = require('lodash');
+
+const topLogPrefix = 'larvitammail: index.js: ';
 
 function Mailer(options, cb) {
-	const	logPrefix	= topLogPrefix + 'Mailer() - ';
+	const logPrefix = topLogPrefix + 'Mailer() - ';
 
 	if (options === undefined) {
-		options	= {};
+		options = {};
 	}
 
-	this.options	= options;
+	this.options = options;
 
-	this.compiledTemplates	= {};
-	this.emitter	= new EventEmitter();
-	this.intercom	= options.intercom;
-	this.mail	= options.mail;
-	this.subscribed	= false;
-	this.subscriptionInProgress	= false;
-	this.subscriptions 	= {};
+	this.compiledTemplates = {};
+	this.emitter = new EventEmitter();
+	this.intercom = options.intercom;
+	this.mail = options.mail;
+	this.subscribed = false;
+	this.subscriptionInProgress = false;
+	this.subscriptions = {};
 
 	this.emitter.setMaxListeners(30);
 
@@ -35,26 +36,28 @@ function Mailer(options, cb) {
 };
 
 Mailer.prototype.getActions = function getActions(subPath, cb) {
-	const	subscriptions	= {},
-		logPrefix	= topLogPrefix + 'getActions() - ';
+	const subscriptions = {};
+	const logPrefix = topLogPrefix + 'getActions() - ';
 
 	fs.readdir(subPath, function (err, exchanges) {
-		const	tasks	= [];
+		const tasks = [];
 
 		if (err) {
 			log.warn(logPrefix + 'Could not read subscriptions dir: "' + subPath + '", err: ' + err.message);
+
 			return cb(err);
 		}
 
 		// For each exchange, list actions
-		for (let i = 0; exchanges[i] !== undefined; i ++) {
-			const	exchange	= exchanges[i],
-				exPath	= subPath + '/' + exchange;
+		for (let i = 0; exchanges[i] !== undefined; i++) {
+			const exchange = exchanges[i];
+			const exPath = subPath + '/' + exchange;
 
 			tasks.push(function (cb) {
 				fs.readdir(exPath, function (err, actions) {
 					if (err) {
 						log.warn(logPrefix + 'Could not read actions for dir: "' + exPath + '", err: ' + err.message);
+
 						return cb(err);
 					}
 
@@ -62,11 +65,11 @@ Mailer.prototype.getActions = function getActions(subPath, cb) {
 						subscriptions[exchange] = {};
 					}
 
-					for (let i = 0; actions[i] !== undefined; i ++) {
-						const	action	= actions[i];
+					for (let i = 0; actions[i] !== undefined; i++) {
+						const action = actions[i];
 
 						if (action.substring(action.length - 3) === '.js') {
-							const	actPath	= exPath + '/' + action;
+							const actPath = exPath + '/' + action;
 
 							subscriptions[exchange][action.substring(0, action.length - 3)] = require(actPath);
 						}
@@ -84,15 +87,16 @@ Mailer.prototype.getActions = function getActions(subPath, cb) {
 };
 
 Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message, ack) {
-	const	logPrefix	= topLogPrefix + 'handleIncMsg() - exchange: "' + exchange + '", action: "' + message.action + '" - ',
-		tasks	= [],
-		that	= this;
+	const logPrefix = topLogPrefix + 'handleIncMsg() - exchange: "' + exchange + '", action: "' + message.action + '" - ';
+	const tasks = [];
+	const that = this;
 
-	let	templatePath,
-		mailData;
+	let templatePath;
+	let mailData;
 
 	if (that.subscriptions[exchange][message.action] === undefined) {
 		log.debug(logPrefix + 'No subscription found, ignoring');
+
 		return ack();
 	}
 
@@ -103,12 +107,13 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 		that.subscriptions[exchange][message.action](message, function (err, result) {
 			if (err) {
 				log.warn(logPrefix + 'Err running subscription function: ' + err.message);
+
 				return cb(err);
 			}
 
 			log.debug(logPrefix + 'Subscription function ran');
 
-			mailData	= result;
+			mailData = result;
 
 			if (mailData.notSend === true) {
 				log.debug(logPrefix + 'mailData.notSend === true - do not send this email');
@@ -124,13 +129,14 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 
 		if (mailData.notSend === true) {
 			log.debug(logPrefix + 'notSend === true, do not proceed with resolving template');
+
 			return cb();
 		}
 
 		that.resolveTemplatePath(subPath, exchange, message.action, mailData, function (err, result) {
-			templatePath	= result;
+			templatePath = result;
 
-			if ( ! err) {
+			if (!err) {
 				log.debug(logPrefix + 'Template resolved');
 			}
 
@@ -142,17 +148,20 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 	tasks.push(function (cb) {
 		if (mailData.notSend === true) {
 			log.debug(logPrefix + 'notSend === true, do not proceed with compiling template');
+
 			return cb();
 		}
 
 		if (that.compiledTemplates[templatePath] !== undefined) {
 			log.debug(logPrefix + 'that.compiledTemplates[templatePath] !== undefined, compilation not necessary');
+
 			return cb();
 		}
 
 		fs.readFile(templatePath, function (err, sourceTemplate) {
 			if (err) {
 				log.error(logPrefix + 'Could not read templatePath: "' + templatePath + '", err: ' + err.message);
+
 				return cb(err);
 			}
 
@@ -160,6 +169,7 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 				that.compiledTemplates[templatePath] = _.template(sourceTemplate);
 			} catch (err) {
 				log.error(logPrefix + 'Could not compile template, err: ' + err.message);
+
 				return cb(err);
 			}
 
@@ -173,17 +183,19 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 	tasks.push(function (cb) {
 		if (mailData.notSend === true) {
 			log.debug(logPrefix + 'notSend === true, do not proceed with rendering template');
+
 			return cb();
 		}
 
 		try {
 			if (mailData.isHtml) {
-				mailData.html	= that.compiledTemplates[templatePath](mailData.templateData);
+				mailData.html = that.compiledTemplates[templatePath](mailData.templateData);
 			} else {
-				mailData.text	= that.compiledTemplates[templatePath](mailData.templateData);
+				mailData.text = that.compiledTemplates[templatePath](mailData.templateData);
 			}
 		} catch (err) {
 			log.error(logPrefix + 'Could not render template, err: ' + err.message);
+
 			return cb(err);
 		}
 
@@ -196,17 +208,19 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 	tasks.push(function (cb) {
 		if (mailData.notSend === true) {
 			log.debug(logPrefix + 'notSend === true, do not proceed with sending email');
+
 			return cb();
 		}
 
 		log.debug(logPrefix + 'Trying to send email to: "' + mailData.to + '"');
 
 		delete mailData.templateData;
-		that.mail.getInstance().send(mailData, function(err) {
+		that.mail.getInstance().send(mailData, function (err) {
 			if (err) return cb(err);
 			log.verbose(logPrefix + 'Email sent to: "' + mailData.to + '" with subject: "' + mailData.subject + '"');
 
 			that.emitter.emit('mailSent', mailData); // Mainly for testing purposes
+
 			return cb();
 		});
 	});
@@ -221,17 +235,17 @@ Mailer.prototype.ready = function ready(cb) {
 };
 
 Mailer.prototype.registerSubscriptions = function registerSubscriptions(cb) {
-	const	logPrefix	= topLogPrefix + 'Mailer.prototype.registerSubscriptions() - ',
-		subPath	= process.cwd() + '/subscriptions',
-		tasks	= [],
-		that	= this;
+	const logPrefix = topLogPrefix + 'Mailer.prototype.registerSubscriptions() - ';
+	const subPath = process.cwd() + '/subscriptions';
+	const tasks = [];
+	const that = this;
 
 	if (typeof cb !== 'function') {
 		cb = function () {};
 	}
 
 	if (that.subscriptionInProgress === true) {
-		const	err	= new Error(logPrefix + 'registration already in progress');
+		const err = new Error(logPrefix + 'registration already in progress');
 		return cb(err);
 	}
 
@@ -241,26 +255,27 @@ Mailer.prototype.registerSubscriptions = function registerSubscriptions(cb) {
 
 	that.subscriptionInProgress = true;
 
-	if ( ! fs.existsSync(subPath)) {
+	if (!fs.existsSync(subPath)) {
 		log.info(logPrefix + 'No subscriptions registered, could not find subscriptions path: "' + subPath + '"');
+
 		return cb();
 	}
 
 	// Get exchanges and actions
 	tasks.push(function (cb) {
 		that.getActions(subPath, function (err, actions) {
-			that.subscriptions	= actions;
+			that.subscriptions = actions;
 			cb(err);
 		});
 	});
 
 	// For each action, register functions and send mails etc
 	tasks.push(function (cb) {
-		const	tasks	= [];
+		const tasks = [];
 
 		for (const exchange of Object.keys(that.subscriptions)) {
 			tasks.push(function (cb) {
-				that.intercom.subscribe({'exchange': exchange}, function (message, ack) {
+				that.intercom.subscribe({exchange: exchange}, function (message, ack) {
 					that.handleIncMsg(subPath, exchange, message, ack);
 				}, cb);
 			});
@@ -271,8 +286,8 @@ Mailer.prototype.registerSubscriptions = function registerSubscriptions(cb) {
 
 	async.series(tasks, function (err) {
 		that.subscriptionInProgress = false;
-		if ( ! err) {
-			that.subscribed	= true;
+		if (!err) {
+			that.subscribed = true;
 			that.emitter.emit('subscribed');
 		}
 		cb(err);
@@ -280,9 +295,9 @@ Mailer.prototype.registerSubscriptions = function registerSubscriptions(cb) {
 };
 
 Mailer.prototype.resolveTemplatePath = function resolveTemplatePath(subPath, exchange, action, mailData, cb) {
-	const	logPrefix	= topLogPrefix + 'Mailer.prototype.resolveTemplatePath() - ';
+	const logPrefix = topLogPrefix + 'Mailer.prototype.resolveTemplatePath() - ';
 
-	let	templatePath;
+	let templatePath;
 
 	if (mailData.templatePath === undefined) {
 		templatePath = subPath + '/' + exchange + '/' + action + '.tmpl';
@@ -290,9 +305,11 @@ Mailer.prototype.resolveTemplatePath = function resolveTemplatePath(subPath, exc
 		templatePath = mailData.templatePath;
 	}
 
-	if ( ! fs.existsSync(templatePath)) {
-		const	err	= new Error('Mail template not found: "' + templatePath + '"');
+	if (!fs.existsSync(templatePath)) {
+		const err = new Error('Mail template not found: "' + templatePath + '"');
+
 		log.error(logPrefix + err.message);
+
 		return cb(err);
 	}
 
