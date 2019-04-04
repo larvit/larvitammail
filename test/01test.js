@@ -4,20 +4,38 @@ const stubTransport = require('nodemailer-stub-transport');
 const Intercom = require('larvitamintercom');
 const AmMail = require('../index.js');
 const assert = require('assert');
-const mail = require('larvitmail');
-const log = require('winston');
-
-// Set up winston
-log.remove(log.transports.Console);
+const Mail = require('larvitmail');
 
 // Set current working directory to make sure subscriptions-folders are found correctly
 process.chdir(__dirname);
 
+// Silent logger
+const log = {
+	info: () => {},
+	warn: () => {},
+	error: () => {},
+	verbose: () => {},
+	debug: () => {},
+	silly: () => {}
+};
+
 describe('Basics', function () {
 	const subPath = __dirname + '/subscriptions';
 
+	let mail;
+
+	beforeEach(() => {
+		mail = new Mail({
+			transportConf: stubTransport(),
+			mailDefaults: {
+				from: 'foo@bar.com'
+			},
+			log
+		});
+	});
+
 	it('get actions', function (done) {
-		const amMail = new AmMail();
+		const amMail = new AmMail({mail, log});
 
 		amMail.getActions(subPath, function (err, subscriptions) {
 			if (err) throw err;
@@ -37,7 +55,7 @@ describe('Basics', function () {
 	});
 
 	it('auto-resolve template path', function (done) {
-		const amMail = new AmMail();
+		const amMail = new AmMail({mail, log});
 
 		amMail.resolveTemplatePath(subPath, 'foo', 'blubb', {to: 'nisse@blubb.com'}, function (err, templatePath) {
 			if (err) throw err;
@@ -48,7 +66,7 @@ describe('Basics', function () {
 	});
 
 	it('fail to auto-resolve template path when no template exists', function (done) {
-		const amMail = new AmMail();
+		const amMail = new AmMail({mail, log});
 
 		amMail.resolveTemplatePath(subPath, 'foo', 'bar', {to: 'nisse@blubb.com'}, function (err, templatePath) {
 			assert.strictEqual(templatePath, undefined);
@@ -61,7 +79,7 @@ describe('Basics', function () {
 	it('accept custom template path when template file exists', function (done) {
 		const customTemplatePath = subPath + '/testExchange/custom.tmpl';
 		const options = {};
-		const amMail = new AmMail();
+		const amMail = new AmMail({mail, log});
 
 		options.to = 'nisse@blubb.com';
 		options.templatePath = customTemplatePath;
@@ -77,7 +95,7 @@ describe('Basics', function () {
 	it('fail to accept custom template path when template file does not exists', function (done) {
 		const customTemplatePath = subPath + '/testExchange/wupp.tmpl';
 		const options = {};
-		const amMail = new AmMail();
+		const amMail = new AmMail({mail, log});
 
 		options.to = 'nisse@blubb.com';
 		options.templatePath = customTemplatePath;
@@ -94,14 +112,14 @@ describe('Basics', function () {
 describe('Integration', function () {
 	it('listen to a subscription, send a mail and dont crash', function (done) {
 		const intercom = new Intercom('loopback interface');
-		const amMail = new AmMail({ intercom: intercom, mail: mail}, function (err) { if (err) throw err; });
-
-		mail.setup({
+		const mail = new Mail({
 			transportConf: stubTransport(),
 			mailDefaults: {
 				from: 'foo@bar.com'
-			}
+			},
+			log
 		});
+		const amMail = new AmMail({ intercom, mail, log }, function (err) { if (err) throw err; });
 
 		amMail.ready(function (err) {
 			if (err) throw err;

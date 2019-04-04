@@ -17,15 +17,15 @@
   },
   "homepage": "https://github.com/larvit/larvitammail#readme",
   "devDependencies": {
-    "mocha": "^5.1.1",
-    "mocha-eslint": "^4.1.0",
+    "mocha": "^6.0.2",
+    "mocha-eslint": "^5.0.0",
     "nodemailer-stub-transport": "^1.1.0"
   },
   "dependencies": {
     "async": "^2.1.5",
-    "larvitamintercom": "^0.2.2",
-    "larvitmail": "^1.0.4",
-    "larvitutils": "^1.1.1",
+    "larvitamintercom": "^0.3.5",
+    "larvitmail": "^2.0.2",
+    "larvitutils": "^2.1.1",
     "lodash": "^4.17.4",
     "winston": "^2.3.1"
   }
