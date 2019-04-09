@@ -20,6 +20,9 @@ function Mailer(options, cb) {
 	this.emitter	= new EventEmitter();
 	this.intercom	= options.intercom;
 	this.mail	= options.mail;
+	this.resend = options.resend || {};
+	this.resend.enabled = (this.resend.enabled !== undefined) ? this.resend.enabled : true;
+	this.resend.intervalMs = this.resend.intervalMs || 120000;
 	this.subscribed	= false;
 	this.subscriptionInProgress	= false;
 	this.subscriptions 	= {};
@@ -203,7 +206,30 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 
 		delete mailData.templateData;
 		that.mail.getInstance().send(mailData, function(err) {
-			if (err) return cb(err);
+			if (err) {
+				// Resend email based on configuration (it would be better if we could use rabbitmq recover with delay but not sure if that is possible)
+				if (that.resend.enabled) {
+					const sendOptions = {
+							'exchange': exchange
+						},
+						resendMessage = {
+							'action': message.action,
+							'params': message.params
+						};
+
+					setTimeout(function () {
+						log.info(logPrefix + 'Resending email to: "' + mailData.to + '" with subject: "' + mailData.subject + '"');
+						that.intercom.send(resendMessage, sendOptions, function (err) {
+							if (err) {
+								log.warn(logPrefix + 'Could not send resend-message to queue, exchange: "' + sendOptions.exchange + '", action: "' + resendMessage.action + '", err:' + err.message);
+							}
+						});
+					}, that.resend.intervalMs);
+				}
+
+				return cb(err);
+			}
+
 			log.verbose(logPrefix + 'Email sent to: "' + mailData.to + '" with subject: "' + mailData.subject + '"');
 
 			that.emitter.emit('mailSent', mailData); // Mainly for testing purposes
@@ -260,7 +286,7 @@ Mailer.prototype.registerSubscriptions = function registerSubscriptions(cb) {
 
 		for (const exchange of Object.keys(that.subscriptions)) {
 			tasks.push(function (cb) {
-				that.intercom.subscribe({'exchange': exchange}, function (message, ack) {
+				that.intercom.consume({'exchange': exchange}, function (message, ack) {
 					that.handleIncMsg(subPath, exchange, message, ack);
 				}, cb);
 			});
