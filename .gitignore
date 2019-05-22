@@ -4,3 +4,4 @@ config/amqp_test.json
 config/mailConf_test.json
 node_modules
 npm-debug.log
+.vscode/

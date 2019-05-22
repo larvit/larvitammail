@@ -4,10 +4,14 @@ const stubTransport = require('nodemailer-stub-transport');
 const Intercom = require('larvitamintercom');
 const AmMail = require('../index.js');
 const assert = require('assert');
+const sinon = require('sinon');
 const Mail = require('larvitmail');
 
 // Set current working directory to make sure subscriptions-folders are found correctly
 process.chdir(__dirname);
+
+let mailStub;
+let sendStub;
 
 // Silent logger
 const log = {
@@ -18,6 +22,18 @@ const log = {
 	debug: () => {},
 	silly: () => {}
 };
+
+beforeEach(function () {
+	sendStub = sinon.stub();
+
+	mailStub = {
+		send: sendStub
+	};
+});
+
+afterEach(function () {
+	sinon.restore();
+});
 
 describe('Basics', function () {
 	const subPath = __dirname + '/subscriptions';
@@ -120,6 +136,34 @@ describe('Integration', function () {
 			log
 		});
 		const amMail = new AmMail({ intercom, mail, log }, function (err) { if (err) throw err; });
+
+		amMail.ready(function (err) {
+			if (err) throw err;
+
+			intercom.send({action: 'blubb'}, {exchange: 'foo'}, function (err) {
+				if (err) throw err;
+
+				amMail.emitter.on('mailSent', function (mailData) {
+					assert.strictEqual(mailData.to, 'foo@blubb.org');
+					assert.strictEqual(mailData.text, 'Testing 123 Bosse tut\n');
+
+					done();
+				});
+			});
+		});
+	});
+
+	it('resends mail on failure', function (done) {
+		const intercom = new Intercom('loopback interface');
+		const amMail = new AmMail({
+			intercom: intercom,
+			mail: mailStub,
+			resend: {
+				intervalMs: 1
+			}}, function (err) { if (err) throw err; });
+
+		sendStub.onFirstCall().yieldsAsync(new Error('Failed to send'));
+		sendStub.onSecondCall().yieldsAsync(undefined);
 
 		amMail.ready(function (err) {
 			if (err) throw err;
