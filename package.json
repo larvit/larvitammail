@@ -1,6 +1,6 @@
 {
   "name": "larvitammail",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Mailing framework for larvit AM project",
   "main": "index.js",
   "scripts": {

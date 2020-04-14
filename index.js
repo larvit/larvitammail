@@ -8,6 +8,7 @@ const fs = require('fs');
 const _ = require('lodash');
 
 const topLogPrefix = 'larvitammail: index.js: ';
+const defaultResendTries = 3;
 
 /**
  * Options for Mailer instance.
@@ -41,6 +42,7 @@ function Mailer(options, cb) {
 	this.resend = options.resend || {};
 	this.resend.enabled = (this.resend.enabled !== undefined) ? this.resend.enabled : true;
 	this.resend.intervalMs = this.resend.intervalMs || 120000;
+	this.resend.tries = this.resend.tries !== undefined ? this.resend.tries : defaultResendTries;
 	this.subscribed = false;
 	this.subscriptionInProgress = false;
 	this.subscriptions = {};
@@ -110,6 +112,7 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 
 	let templatePath;
 	let mailData;
+	let ackCalled = false;
 
 	if (that.subscriptions[exchange][message.action] === undefined) {
 		that.log.debug(logPrefix + 'No subscription found, ignoring');
@@ -235,13 +238,18 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 		that.mail.send(mailData, function (err) {
 			if (err) {
 				// Resend email based on configuration (it would be better if we could use rabbitmq recover with delay but not sure if that is possible)
-				if (that.resend.enabled) {
+				message.resendCounter = message.resendCounter || 0;
+
+				if (that.resend.enabled && that.resend.tries > message.resendCounter) {
+					message.resendCounter++;
+
 					const sendOptions = {
 						exchange: exchange
 					};
 					const resendMessage = {
 						action: message.action,
-						params: message.params
+						params: message.params,
+						resendCounter: message.resendCounter
 					};
 
 					setTimeout(function () {
@@ -251,8 +259,15 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 								that.log.warn(logPrefix + 'Could not send resend-message to queue, exchange: "' + sendOptions.exchange + '", action: "' + resendMessage.action + '", err:' + err.message);
 							}
 						});
+
 					}, that.resend.intervalMs);
+				} else {
+					that.log.info(logPrefix + 'Failed to successfully send email to: "' + mailData.to + '" with subject: "' + mailData.subject + '"');
+					that.emitter.emit('failedToSendMail', err); // Mainly for testing purposes
 				}
+
+				ack();
+				ackCalled = true;
 
 				return cb(err);
 			}
@@ -261,11 +276,18 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 
 			that.emitter.emit('mailSent', mailData); // Mainly for testing purposes
 
+			ack();
+			ackCalled = true;
+
 			return cb();
 		});
 	});
 
-	async.series(tasks, ack);
+	async.series(tasks, function () {
+		if (!ackCalled) {
+			ack();
+		}
+	});
 };
 
 Mailer.prototype.ready = function ready(cb) {
