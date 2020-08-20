@@ -15,12 +15,12 @@ let sendStub;
 
 // Silent logger
 const log = {
-	info: () => {},
-	warn: () => {},
-	error: () => {},
-	verbose: () => {},
-	debug: () => {},
-	silly: () => {}
+	info: (logMsg) => { console.log(logMsg); },
+	warn: (logMsg) => { console.log(logMsg); },
+	error: (logMsg) => { console.log(logMsg); },
+	verbose: (logMsg) => { console.log(logMsg); },
+	debug: (logMsg) => { console.log(logMsg); },
+	silly: (logMsg) => { console.log(logMsg); }
 };
 
 beforeEach(function () {
@@ -173,7 +173,8 @@ describe('Integration', function () {
 
 				amMail.emitter.on('mailSent', function (mailData) {
 					assert.strictEqual(mailData.to, 'foo@blubb.org');
-					assert.strictEqual(mailData.text, 'Testing 123 Bosse tut\n');
+					assert.strictEqual(JSON.stringify(mailData.templateData), '{"username":"Bosse"}');
+					assert.strictEqual(mailData.template, 'Testing 123 <%= username %> tut\n');
 
 					done();
 				});
@@ -249,7 +250,8 @@ describe('Integration', function () {
 
 				amMail.emitter.on('mailSent', function (mailData) {
 					assert.strictEqual(mailData.to, 'foo@blubb.org');
-					assert.strictEqual(mailData.text, 'Testing 123 Bosse tut\n');
+					assert.strictEqual(JSON.stringify(mailData.templateData), '{"username":"Bosse"}');
+					assert.strictEqual(mailData.template, 'Testing 123 <%= username %> tut\n');
 
 					done();
 				});

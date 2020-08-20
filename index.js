@@ -5,7 +5,6 @@ const Intercom = require('larvitamintercom');
 const LUtils = require('larvitutils');
 const async = require('async');
 const fs = require('fs');
-const _ = require('lodash');
 
 const topLogPrefix = 'larvitammail: index.js: ';
 const defaultResendTries = 3;
@@ -34,7 +33,7 @@ function Mailer(options, cb) {
 
 	this.options = options;
 
-	this.compiledTemplates = {};
+	this.templates = {};
 	this.emitter = new EventEmitter();
 	this.intercom = options.intercom;
 	this.mail = options.mail;
@@ -164,64 +163,34 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 		});
 	});
 
-	// Compile template
+	// Get template
 	tasks.push(function (cb) {
 		if (mailData.notSend === true) {
-			that.log.debug(logPrefix + 'notSend === true, do not proceed with compiling template');
+			that.log.debug(logPrefix + 'notSend === true, do not proceed');
 
 			return cb();
 		}
 
-		if (that.compiledTemplates[templatePath] !== undefined) {
-			that.log.debug(logPrefix + 'that.compiledTemplates[templatePath] !== undefined, compilation not necessary');
-
-			return cb();
-		}
-
-		fs.readFile(templatePath, function (err, sourceTemplate) {
+		fs.readFile(templatePath, 'utf8', function (err, sourceTemplate) {
 			if (err) {
 				that.log.error(logPrefix + 'Could not read templatePath: "' + templatePath + '", err: ' + err.message);
 
 				return cb(err);
 			}
 
-			try {
-				that.compiledTemplates[templatePath] = _.template(sourceTemplate);
-			} catch (err) {
-				that.log.error(logPrefix + 'Could not compile template, err: ' + err.message);
+			if (!sourceTemplate) {
+				that.log.error(logPrefix + 'Could not find template');
 
-				return cb(err);
+				return cb();
 			}
 
-			that.log.debug(logPrefix + 'Template compiled');
+
+			that.templates[templatePath] = sourceTemplate;
+
+			that.log.debug(logPrefix + 'Template found');
 
 			cb();
 		});
-	});
-
-	// Render template
-	tasks.push(function (cb) {
-		if (mailData.notSend === true) {
-			that.log.debug(logPrefix + 'notSend === true, do not proceed with rendering template');
-
-			return cb();
-		}
-
-		try {
-			if (mailData.isHtml) {
-				mailData.html = that.compiledTemplates[templatePath](mailData.templateData);
-			} else {
-				mailData.text = that.compiledTemplates[templatePath](mailData.templateData);
-			}
-		} catch (err) {
-			that.log.error(logPrefix + 'Could not render template, err: ' + err.message);
-
-			return cb(err);
-		}
-
-		that.log.debug(logPrefix + 'Template rendered');
-
-		cb();
 	});
 
 	// Send email
@@ -234,7 +203,8 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 
 		that.log.debug(logPrefix + 'Trying to send email to: "' + mailData.to + '"');
 
-		delete mailData.templateData;
+		mailData.template = that.templates[templatePath];
+
 		that.mail.send(mailData, function (err) {
 			if (err) {
 				// Resend email based on configuration (it would be better if we could use rabbitmq recover with delay but not sure if that is possible)
