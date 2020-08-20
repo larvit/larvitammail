@@ -171,6 +171,11 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 			return cb();
 		}
 
+		if (that.templates[templatePath]) {
+			// Template already read
+			return cb();
+		}
+
 		fs.readFile(templatePath, 'utf8', function (err, sourceTemplate) {
 			if (err) {
 				that.log.error(logPrefix + 'Could not read templatePath: "' + templatePath + '", err: ' + err.message);
@@ -183,7 +188,6 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 
 				return cb();
 			}
-
 
 			that.templates[templatePath] = sourceTemplate;
 
