@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/larvit/larvitammail.svg?branch=master)](https://travis-ci.org/larvit/larvitammail) [![Dependencies](https://david-dm.org/larvit/larvitammail.svg)](https://david-dm.org/larvit/larvitammail.svg)
+[![Build Status](https://github.com/larvit/larvitammail/actions/workflows/actions.yml/badge.svg)](https://github.com/larvit/larvitammail/actions)
 
 # larvitammail
 
@@ -12,29 +12,22 @@ sends emails depending on rules in the extensions.
 ### Setup
 
 ```javascript
-const	Intercom	= require('larvitamintercom'),
-	AmMail	= require('larvitammail'),
-	mail	= require('larvitmail');
+const Intercom = require('larvitamintercom'),
+const AmMail = require('larvitammail'),
+const Mail = require('larvitmail');
 
-let	amMail;
-
-mail.setup({
-	'transportConf': 'smtps://user%40gmail.com:pass@smtp.gmail.com',
-	'mailDefaults': {
-		'from':	'foo@bar.com'
-	}
+const amMail = new AmMail({
+	intercom: new Intercom('amqp://user:password@192.168.0.1/'), // It is important this is a standalone intercom instance!
+	mail: new Mail({
+		transportConf: 'smtps://user%40gmail.com:pass@smtp.gmail.com',
+		mailDefaults: {
+			from: 'foo@bar.com'
+		}
+	}),
 });
 
-amMail = new AmMail({
-	'intercom':	new Intercom('amqp://user:password@192.168.0.1/'), // It is important this is a standalone intercom instance!
-	'mail':	mail,
-});
-
-amMail.ready(function (err) {
-	if ( ! err) {
-		console.log('amMail is now listening and ready!');
-	}
-})
+await amMail.registerSubscriptions();
+// Up and running now!
 ```
 
 #### Subscriptions
@@ -47,29 +40,26 @@ And it should look something like this (subscriptions/exampleExchange/exampleAct
 
 ```javascript
 // The value "params" here is the object that was sent in the subscriptions message.
-exports = module.exports = function (params, cb) {
-	cb(
-		null, // error, if any
-		{
-			// Mandatory
-			'to':	'bar@foo.com',
+exports = module.exports = async params => {
+	return {
+		// Mandatory
+		to: 'bar@foo.com',
 
-			// Optional
-			'subject':	'The file you wanted',	// Defaults to empty string
-			'from':	'from@someone.com',	// Defaults to mail defaults from
-			'templateData':	{'username': 'Lennart'},	// Defaults to empty object. This is the data that will be sent to the email template.
-			'notSend':	true,	// Will make this email not being sent
-			'template':	'subscriptions/exampleExchange/exampleAction.tmpl',	// Defaults to the same as this file, but tmpl instead of js as file ending
+		// Optional
+		subject: 'The file you wanted', // Defaults to empty string
+		from: 'from@someone.com', // Defaults to mail defaults from
+		templateData: {'username': 'Lennart'}, // Defaults to empty object. This is the data that will be sent to the email template.
+		notSend: true, // Will make this email not being sent
+		template: 'subscriptions/exampleExchange/exampleAction.tmpl',	// Defaults to the same as this file, but tmpl instead of js as file ending
 
-			// Attachments, attached files, optional
-			'attachments': [
-				{
-					'filename':	'text.txt',
-					'content':	new Buffer('hello world!', 'utf-8')
-				}
-			]
-		}
-	);
+		// Attachments, attached files, optional
+		attachments: [
+			{
+				filename: 'text.txt',
+				content: new Buffer('hello world!', 'utf-8')
+			}
+		]
+	};
 };
 ```
 

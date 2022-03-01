@@ -1,5 +1,5 @@
 'use strict';
 
-exports = module.exports = function (params, cb) {
-	cb(null, {to: 'bar@foo.com'});
+exports = module.exports = async function () {
+	return {to: 'bar@foo.com'};
 };

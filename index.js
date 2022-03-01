@@ -2,219 +2,167 @@
 
 const EventEmitter = require('events');
 const Intercom = require('larvitamintercom');
-const LUtils = require('larvitutils');
+const { Log } = require('larvitutils');
 const async = require('async');
 const fs = require('fs');
 
-const topLogPrefix = 'larvitammail: index.js: ';
+const topLogPrefix = 'larvitammail: index.js:';
 const defaultResendTries = 3;
 
-/**
- * Options for Mailer instance.
- * @param {object} options - Mailer options
- * @param {string} options.mail - A larvitmail compatible instance
- * @param {object} [options.intercom] - A larvitamintercom compatible instance, defaults to loopback interface if not set
- * @param {object} [options.lUtils] - Instance of larvitutils. Will be created if not set
- * @param {object} [options.log] - Instans of logger. Will default to larvitutils logger if not set
- * @param {function} [cb] - Callback function, called with cb(err) where err will indicate any error during instantiation
- */
-function Mailer(options, cb) {
-	const logPrefix = topLogPrefix + 'Mailer() - ';
+class Mailer {
 
-	if (options === undefined) {
-		options = {};
+	/**
+	 * Options for Mailer instance.
+	 * @param {object} options - Mailer options
+	 * @param {string} options.mail - A larvitmail compatible instance
+	 * @param {object} [options.intercom] - A larvitamintercom compatible instance, defaults to loopback interface if not set
+	 * @param {object} [options.log] - Instans of logger. Will default to larvitutils logger if not set
+	 */
+	constructor(options) {
+		if (options === undefined) {
+			options = {};
+		}
+
+		if (!options.mail) throw new Error('Missing required option "mail"');
+
+		options.intercom = options.intercom || new Intercom('loopback interface');
+
+		this.options = options;
+
+		this.templates = {};
+		this.emitter = new EventEmitter();
+		this.intercom = options.intercom;
+		this.mail = options.mail;
+		this.log = options.log || new Log('info');
+		this.resend = options.resend || {};
+		this.resend.enabled = (this.resend.enabled !== undefined) ? this.resend.enabled : true;
+		this.resend.intervalMs = this.resend.intervalMs || 120000;
+		this.resend.tries = this.resend.tries !== undefined ? this.resend.tries : defaultResendTries;
+		this.subscribed = false;
+		this.subscriptionInProgress = false;
+		this.subscriptions = {};
+
+		this.emitter.setMaxListeners(30);
+	};
+
+	async getPathConent(subPath) {
+		const logPrefix = `${topLogPrefix} getPathConent() -`;
+
+		try {
+			const content = await fs.promises.readdir(subPath);
+			return content;
+		} catch (err) {
+			this.log.warn(`${logPrefix} Could not read dir: "${subPath}", err: ${err.message}`);
+			throw err;
+		}
 	}
 
-	if (!options.mail) throw new Error('Missing required option "mail"');
+	async getActions(subPath) {
+		const logPrefix = `${topLogPrefix} getActions() -`;
+		const subscriptions = {};
 
-	options.lUtils = options.lUtils || new LUtils();
-	options.log = options.log || new options.lUtils.Log('info');
-	options.intercom = options.intercom || new Intercom('loopback interface');
-
-	this.options = options;
-
-	this.templates = {};
-	this.emitter = new EventEmitter();
-	this.intercom = options.intercom;
-	this.mail = options.mail;
-	this.log = options.log;
-	this.resend = options.resend || {};
-	this.resend.enabled = (this.resend.enabled !== undefined) ? this.resend.enabled : true;
-	this.resend.intervalMs = this.resend.intervalMs || 120000;
-	this.resend.tries = this.resend.tries !== undefined ? this.resend.tries : defaultResendTries;
-	this.subscribed = false;
-	this.subscriptionInProgress = false;
-	this.subscriptions = {};
-
-	this.emitter.setMaxListeners(30);
-
-	this.log.verbose(logPrefix + 'intercom and mail is set, run registerSubscriptions()');
-	this.registerSubscriptions(cb);
-};
-
-Mailer.prototype.getActions = function getActions(subPath, cb) {
-	const that = this;
-	const subscriptions = {};
-	const logPrefix = topLogPrefix + 'getActions() - ';
-
-	fs.readdir(subPath, function (err, exchanges) {
+		const exchanges = await this.getPathConent(subPath);
 		const tasks = [];
 
-		if (err) {
-			that.log.warn(logPrefix + 'Could not read subscriptions dir: "' + subPath + '", err: ' + err.message);
-
-			return cb(err);
-		}
+		this.log.info(`${logPrefix} Found exchanges: ${JSON.stringify(exchanges)}`);
 
 		// For each exchange, list actions
-		for (let i = 0; exchanges[i] !== undefined; i++) {
-			const exchange = exchanges[i];
+		for (const exchange of exchanges) {
 			const exPath = subPath + '/' + exchange;
 
-			tasks.push(function (cb) {
-				fs.readdir(exPath, function (err, actions) {
-					if (err) {
-						that.log.warn(logPrefix + 'Could not read actions for dir: "' + exPath + '", err: ' + err.message);
+			tasks.push((async () => {
+				const actions = await this.getPathConent(exPath);
 
-						return cb(err);
+				subscriptions[exchange] = subscriptions[exchange] || {};
+
+				for (const action of actions) {
+					if (action.substring(action.length - 3) === '.js') {
+						const actPath = exPath + '/' + action;
+
+						this.log.info(`${logPrefix} Found action in exchange "${exchange}": ${action}`);
+
+						subscriptions[exchange][action.substring(0, action.length - 3)] = require(actPath);
 					}
-
-					if (subscriptions[exchange] === undefined) {
-						subscriptions[exchange] = {};
-					}
-
-					for (let i = 0; actions[i] !== undefined; i++) {
-						const action = actions[i];
-
-						if (action.substring(action.length - 3) === '.js') {
-							const actPath = exPath + '/' + action;
-
-							subscriptions[exchange][action.substring(0, action.length - 3)] = require(actPath);
-						}
-					}
-
-					cb();
-				});
-			});
+				}
+			})());
 		}
 
-		async.parallel(tasks, function (err) {
-			cb(err, subscriptions);
-		});
-	});
-};
+		await Promise.all(tasks);
 
-Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message, ack) {
-	const logPrefix = topLogPrefix + 'handleIncMsg() - exchange: "' + exchange + '", action: "' + message.action + '" - ';
-	const tasks = [];
-	const that = this;
+		return subscriptions;
+	};
 
-	let templatePath;
-	let mailData;
-	let ackCalled = false;
+	async runAction(exchange, message) {
+		const logPrefix = `${topLogPrefix} runAction() -`;
 
-	if (that.subscriptions[exchange][message.action] === undefined) {
-		that.log.debug(logPrefix + 'No subscription found, ignoring');
+		this.log.debug(`${logPrefix} Running subscription function`);
 
-		return ack();
+		try {
+			const mailData = await this.subscriptions[exchange][message.action](message);
+
+			this.log.debug(`${logPrefix} Subscription function ran`);
+
+			return mailData;
+		} catch (err) {
+			const errWrap = new Error(`Error running subscription "${exchange}/${message.action}", err: ${err.message}`);
+			this.log.warn(`${logPrefix} ${errWrap.message}`);
+			this.emitter.emit('actionError', errWrap);
+
+			throw errWrap;
+		}
 	}
 
-	// Run subscription function
-	tasks.push(function (cb) {
-		that.log.debug(logPrefix + 'Running subscription function');
+	async handleIncMsg(subPath, exchange, message, ack) {
+		const logPrefix = `${topLogPrefix} handleIncMsg() - exchange: "${exchange}", action: "${message.action}" -`;
 
-		that.subscriptions[exchange][message.action](message, function (err, result) {
-			if (err) {
-				that.log.warn(logPrefix + 'Err running subscription function: ' + err.message);
+		let ackCalled = false;
+		try {
+			if (!this.subscriptions[exchange][message.action]) {
+				this.log.verbose(`${logPrefix} No subscription found, ignoring`);
+				this.emitter.emit('actionNotFound', message.action);
 
-				return cb(err);
+				return ack();
 			}
 
-			that.log.debug(logPrefix + 'Subscription function ran');
-
-			mailData = result;
+			// Run subscription function
+			const mailData = await this.runAction(exchange, message);
 
 			if (mailData.notSend === true) {
-				that.log.debug(logPrefix + 'mailData.notSend === true - do not send this email');
+				const notSendMessage = 'mailData.notSend === true - do not send this email';
+				this.log.verbose(`${logPrefix} ${notSendMessage}`);
+				this.emitter.emit('mailNotSent', {
+					action: message.action,
+					exchange,
+					infoMessage: notSendMessage,
+					message
+				});
+
+				return ack();
 			}
 
-			cb();
-		});
-	});
+			// Resolve template
+			this.log.debug(`${logPrefix} Resolving template`);
+			const templatePath = this.resolveTemplatePath(subPath, exchange, message.action, mailData);
+			this.log.debug(`${logPrefix} Template resolved`);
 
-	// Resolve template
-	tasks.push(function (cb) {
-		that.log.debug(logPrefix + 'Resolving template');
-
-		if (mailData.notSend === true) {
-			that.log.debug(logPrefix + 'notSend === true, do not proceed with resolving template');
-
-			return cb();
-		}
-
-		that.resolveTemplatePath(subPath, exchange, message.action, mailData, function (err, result) {
-			templatePath = result;
-
-			if (!err) {
-				that.log.debug(logPrefix + 'Template resolved');
+			// Get template
+			if (!this.templates[templatePath]) {
+				const sourceTemplate = await fs.promises.readFile(templatePath, 'utf8');
+				this.templates[templatePath] = sourceTemplate;
+				this.log.debug(`${logPrefix} Template found`);
 			}
 
-			cb(err);
-		});
-	});
+			// Send email
+			this.log.debug(`${logPrefix} Trying to send email to: "${mailData.to}"`);
+			mailData.template = this.templates[templatePath];
 
-	// Get template
-	tasks.push(function (cb) {
-		if (mailData.notSend === true) {
-			that.log.debug(logPrefix + 'notSend === true, do not proceed');
-
-			return cb();
-		}
-
-		if (that.templates[templatePath]) {
-			// Template already read
-			return cb();
-		}
-
-		fs.readFile(templatePath, 'utf8', function (err, sourceTemplate) {
-			if (err) {
-				that.log.error(logPrefix + 'Could not read templatePath: "' + templatePath + '", err: ' + err.message);
-
-				return cb(err);
-			}
-
-			if (!sourceTemplate) {
-				that.log.error(logPrefix + 'Could not find template');
-
-				return cb();
-			}
-
-			that.templates[templatePath] = sourceTemplate;
-
-			that.log.debug(logPrefix + 'Template found');
-
-			cb();
-		});
-	});
-
-	// Send email
-	tasks.push(function (cb) {
-		if (mailData.notSend === true) {
-			that.log.debug(logPrefix + 'notSend === true, do not proceed with sending email');
-
-			return cb();
-		}
-
-		that.log.debug(logPrefix + 'Trying to send email to: "' + mailData.to + '"');
-
-		mailData.template = that.templates[templatePath];
-
-		that.mail.send(mailData, function (err) {
-			if (err) {
-				// Resend email based on configuration (it would be better if we could use rabbitmq recover with delay but not sure if that is possible)
+			try {
+				await this.mail.send(mailData);
+			} catch (err) {
+				// Resend email based on configuration (it would be better if we could use rabbitmq recover with delay but not sure if this is possible)
 				message.resendCounter = message.resendCounter || 0;
 
-				if (that.resend.enabled && that.resend.tries > message.resendCounter) {
+				if (this.resend.enabled && this.resend.tries > message.resendCounter) {
 					message.resendCounter++;
 
 					const sendOptions = {
@@ -226,131 +174,150 @@ Mailer.prototype.handleIncMsg = function handleIncMsg(subPath, exchange, message
 						resendCounter: message.resendCounter
 					};
 
-					setTimeout(function () {
-						that.log.info(logPrefix + 'Resending email to: "' + mailData.to + '" with subject: "' + mailData.subject + '"');
-						that.intercom.send(resendMessage, sendOptions, function (err) {
+					setTimeout(() => {
+						this.log.info(`${logPrefix} Resending email to: "${mailData.to}" with subject: "${mailData.subject}"`);
+						this.intercom.send(resendMessage, sendOptions, err => {
+							// istanbul ignore if
 							if (err) {
-								that.log.warn(logPrefix + 'Could not send resend-message to queue, exchange: "' + sendOptions.exchange + '", action: "' + resendMessage.action + '", err:' + err.message);
+								this.log.warn(`${logPrefix} Could not send resend-message to queue, exchange: "${sendOptions.exchange}", action: "${resendMessage.action}", err:${err.message}`);
 							}
 						});
 
-					}, that.resend.intervalMs);
+					}, this.resend.intervalMs);
 				} else {
-					that.log.info(logPrefix + 'Failed to successfully send email to: "' + mailData.to + '" with subject: "' + mailData.subject + '"');
-					that.emitter.emit('failedToSendMail', err); // Mainly for testing purposes
+					this.log.warn(`${logPrefix} Failed to successfully send email to: "${mailData.to}" with subject: "${mailData.subject}"`);
+					this.emitter.emit('failedToSendMail', err); // Mainly for testing purposes
 				}
 
 				ack();
 				ackCalled = true;
 
-				return cb(err);
+				throw err;
 			}
 
-			that.log.verbose(logPrefix + 'Email sent to: "' + mailData.to + '" with subject: "' + mailData.subject + '"');
-
-			that.emitter.emit('mailSent', mailData); // Mainly for testing purposes
+			this.log.verbose(`${logPrefix} Email sent to: "${mailData.to}" with subject: "${mailData.subject}"`);
+			this.emitter.emit('mailSent', mailData); // Mainly for testing purposes
 
 			ack();
 			ackCalled = true;
-
-			return cb();
-		});
-	});
-
-	async.series(tasks, function () {
-		if (!ackCalled) {
-			ack();
+		} catch (err) {
+			this.log.verbose(`${logPrefix} Failed to handle message, err: ${err.message}`);
+			if (!ackCalled) {
+				ack();
+			}
 		}
-	});
-};
+	};
 
-Mailer.prototype.ready = function ready(cb) {
-	if (this.subscribed === true) return cb();
+	ready() {
+		if (this.subscribed) return;
 
-	this.emitter.once('subscribed', cb);
-};
+		return new Promise(res => this.emitter.once('subscribed', res));
+	};
 
-Mailer.prototype.registerSubscriptions = function registerSubscriptions(cb) {
-	const logPrefix = topLogPrefix + 'Mailer.prototype.registerSubscriptions() - ';
-	const subPath = process.cwd() + '/subscriptions';
-	const tasks = [];
-	const that = this;
-
-	if (typeof cb !== 'function') {
-		cb = function () {};
+	/**
+	 * Wrapper arount EventEmitter.
+	 * Events that can be emitted:
+	 * - subscribed(), once subscriptions has been loaded
+	 * - actionNotFound(action), when an action cannot be found in subscription
+	 * - actionError(err), when there is an error running the subscription action
+	 * - mailNotSent({
+	 *     action: message.action,
+	 *     exchange,
+	 *     infoMessage: notSendMessage,
+	 *     message
+	 *   }), when mail is not being sent (due to notSend is set by the action in subscription)
+	 * - failedToSendMail(err), when mail cannot be sent (even after retries)
+	 * - mailSent(mailData), when mail has been sent
+	 * @param {string} event - event name
+	 * @param {function} fn - listener function to handle event
+	 */
+	on(event, fn) {
+		this.emitter.on(event, fn);
 	}
 
-	if (that.subscriptionInProgress === true) {
-		const err = new Error(logPrefix + 'registration already in progress');
-		return cb(err);
+	off(event, fn) {
+		this.emitter.off(event, fn);
 	}
 
-	if (that.subscribed === true) {
-		return cb();
+	/**
+	 * See documentation for on(event, fn).
+	 * @param {string} event -
+	 * @param {function} fn -
+	 */
+	once(event, fn) {
+		this.emitter.once(event, fn);
 	}
 
-	that.subscriptionInProgress = true;
-
-	if (!fs.existsSync(subPath)) {
-		that.log.info(logPrefix + 'No subscriptions registered, could not find subscriptions path: "' + subPath + '"');
-
-		return cb();
+	listenerCount() {
+		return this.emitter.listenerCount();
 	}
 
-	// Get exchanges and actions
-	tasks.push(function (cb) {
-		that.getActions(subPath, function (err, actions) {
-			that.subscriptions = actions;
-			cb(err);
-		});
-	});
+	async registerSubscriptions() {
+		const logPrefix = `${topLogPrefix} Mailer.prototype.registerSubscriptions() -`;
+		const subPath = `${process.cwd()}/subscriptions`;
 
-	// For each action, register functions and send mails etc
-	tasks.push(function (cb) {
+		this.log.verbose(`${logPrefix} Running registerSubscriptions(), subscriptions path: ${subPath}`);
+
+		if (this.subscriptionInProgress) {
+			throw new Error(`${logPrefix} registration already in progress`);
+		}
+
+		if (this.subscribed) {
+			this.log.verbose(`${logPrefix} Already subscribed`);
+
+			return;
+		}
+
+		this.subscriptionInProgress = true;
+
+		if (!fs.existsSync(subPath)) {
+			this.log.info(logPrefix + 'No subscriptions registered, could not find subscriptions path: "' + subPath + '"');
+
+			return;
+		}
+
+		// Get exchanges and actions
+		this.subscriptions = await this.getActions(subPath);
+
+		// For each action, register functions and send mails etc
 		const tasks = [];
 
-		for (const exchange of Object.keys(that.subscriptions)) {
-			tasks.push(function (cb) {
-				that.intercom.consume({exchange: exchange}, function (message, ack) {
-					that.handleIncMsg(subPath, exchange, message, ack);
+		for (const exchange of Object.keys(this.subscriptions)) {
+			tasks.push(cb => {
+				this.intercom.consume({ exchange: exchange }, (message, ack) => {
+					this.handleIncMsg(subPath, exchange, message, ack);
 				}, cb);
 			});
 		}
 
-		async.parallel(tasks, cb);
-	});
+		await async.parallel(tasks);
 
-	async.series(tasks, function (err) {
-		that.subscriptionInProgress = false;
-		if (!err) {
-			that.subscribed = true;
-			that.emitter.emit('subscribed');
+		this.subscriptionInProgress = false;
+		this.subscribed = true;
+		this.emitter.emit('subscribed');
+	};
+
+	resolveTemplatePath(subPath, exchange, action, mailData) {
+		const logPrefix = topLogPrefix + 'Mailer.prototype.resolveTemplatePath() - ';
+
+		let templatePath;
+
+		if (mailData.templatePath === undefined) {
+			templatePath = subPath + '/' + exchange + '/' + action + '.tmpl';
+		} else {
+			templatePath = mailData.templatePath;
 		}
-		cb(err);
-	});
-};
 
-Mailer.prototype.resolveTemplatePath = function resolveTemplatePath(subPath, exchange, action, mailData, cb) {
-	const that = this;
-	const logPrefix = topLogPrefix + 'Mailer.prototype.resolveTemplatePath() - ';
+		if (!fs.existsSync(templatePath)) {
+			const err = new Error('Mail template not found: "' + templatePath + '"');
 
-	let templatePath;
+			this.log.error(logPrefix + err.message);
 
-	if (mailData.templatePath === undefined) {
-		templatePath = subPath + '/' + exchange + '/' + action + '.tmpl';
-	} else {
-		templatePath = mailData.templatePath;
-	}
+			throw err;
+		}
 
-	if (!fs.existsSync(templatePath)) {
-		const err = new Error('Mail template not found: "' + templatePath + '"');
-
-		that.log.error(logPrefix + err.message);
-
-		return cb(err);
-	}
-
-	cb(null, templatePath);
+		return templatePath;
+	};
 };
 
 exports = module.exports = Mailer;

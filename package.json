@@ -1,10 +1,16 @@
 {
   "name": "larvitammail",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Mailing framework for larvit AM project",
   "main": "index.js",
+  "files": [
+    "*.js"
+  ],
   "scripts": {
-    "test": "mocha"
+    "lint": "eslint *.js test/**/*.js",
+    "test:unit": "mocha --exit --bail 'test/*.js'",
+    "test:cov": "nyc --reporter=lcov --reporter=text-summary npm run test:unit",
+    "test": "npm run lint && npm run test:cov"
   },
   "repository": {
     "type": "git",
@@ -17,17 +23,17 @@
   },
   "homepage": "https://github.com/larvit/larvitammail#readme",
   "devDependencies": {
-    "mocha": "^6.1.4",
-    "mocha-eslint": "^5.0.0",
-    "nodemailer-stub-transport": "^1.1.0",
-    "sinon": "^7.3.1"
+    "eslint": "8.9.0",
+    "mocha": "9.2.1",
+    "nodemailer-stub-transport": "1.1.0",
+    "nyc": "15.1.0",
+    "sinon": "13.0.1"
   },
   "dependencies": {
-    "async": "^3.0.0",
-    "larvitamintercom": "^0.3.5",
-    "larvitmail": "^2.0.2",
-    "larvitutils": "^2.1.1",
-    "lodash": "^4.17.4",
-    "winston": "^2.3.1"
+    "async": "3.2.3",
+    "larvitamintercom": "0.4.1",
+    "larvitmail": "3.0.0",
+    "larvitutils": "5.0.0",
+    "lodash": "4.17.21"
   }
 }
