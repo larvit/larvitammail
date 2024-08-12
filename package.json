@@ -1,6 +1,6 @@
 {
   "name": "larvitammail",
-  "version": "0.4.88",
+  "version": "0.4.89",
   "description": "Mailing framework for larvit AM project",
   "main": "index.js",
   "files": [
@@ -24,16 +24,16 @@
   "homepage": "https://github.com/larvit/larvitammail#readme",
   "devDependencies": {
     "eslint": "8.57.0",
-    "mocha": "10.7.0",
+    "mocha": "10.7.3",
     "nodemailer-stub-transport": "1.1.0",
     "nyc": "17.0.0",
     "sinon": "18.0.0"
   },
   "dependencies": {
     "async": "3.2.5",
-    "larvitamintercom": "0.4.71",
-    "larvitmail": "3.0.96",
-    "larvitutils": "5.1.103",
+    "larvitamintercom": "0.4.72",
+    "larvitmail": "3.0.97",
+    "larvitutils": "5.1.104",
     "lodash": "4.17.21"
   }
 }
