@@ -1,6 +1,6 @@
 {
   "name": "larvitammail",
-  "version": "0.4.92",
+  "version": "0.4.93",
   "description": "Mailing framework for larvit AM project",
   "main": "index.js",
   "files": [
@@ -27,7 +27,7 @@
     "mocha": "10.7.3",
     "nodemailer-stub-transport": "1.1.0",
     "nyc": "17.0.0",
-    "sinon": "18.0.0"
+    "sinon": "19.0.2"
   },
   "dependencies": {
     "async": "3.2.5",
