@@ -1,6 +1,6 @@
 {
   "name": "larvitammail",
-  "version": "0.4.117",
+  "version": "0.4.118",
   "description": "Mailing framework for larvit AM project",
   "main": "index.js",
   "files": [
@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "async": "3.2.6",
-    "larvitamintercom": "0.4.99",
+    "larvitamintercom": "1.0.0",
     "larvitmail": "3.0.125",
     "larvitutils": "5.1.141",
     "lodash": "4.17.21"
